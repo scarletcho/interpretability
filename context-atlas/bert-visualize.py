@@ -11,12 +11,15 @@ def get_neighbors(indices, query_sent_id):
     print(df.loc[top10_neighbor_ids, "sentence_set"].to_string().replace(" | ", "\n\t\t"))
 
 
+# Query word and layer number to look at
 word = 'bathroom'
 layer_number = 11
 
+# Load json data
 with open('static/jsons/' + word + '.json') as f:
     corpus = json.load(f)
 
+# Create pandas dataframe from json
 df_list = []
 for i in range(len(corpus['labels'])):
     sentence_set = corpus['labels'][i]['sentence']
@@ -28,14 +31,14 @@ for i in range(len(corpus['labels'])):
 
 df = pd.DataFrame(df_list, columns=['word', 'sent-prev', 'sent-curr', 'sent-next', 'sentence_set', 'tag', 'x', 'y'])
 
-# plt.figure(figsize=(16, 10))
+# Plotting
 plt.figure(figsize=(40, 40))
 p1 = sns.scatterplot(x="x", y="y", data=df, legend="full", alpha=0.9)
-
 texts = [plt.text(df["x"][idx], df["y"][idx], idx) for idx in range(df.shape[0])]
 plt.show()
 
-pd.set_option('display.max_colwidth', -1)
+# Pandas dataframe setting + print texts
+pd.set_option('display.max_colwidth', -1)  # for the full display of text
 print(df['sentence_set'].to_string())
 
 # Get neighbors of a specific sentence
@@ -43,6 +46,13 @@ X = np.array(df[['x', 'y']].values.tolist())
 nbrs = NearestNeighbors(n_neighbors=11, algorithm='ball_tree').fit(X)
 distances, indices = nbrs.kneighbors(X)
 
-query_sent_id = 141
+# Inspect data
+query_sent_id = 436
 get_neighbors(indices, query_sent_id)
+
+# Get neighbors of very small distances (<d)
+
+
+
+
 

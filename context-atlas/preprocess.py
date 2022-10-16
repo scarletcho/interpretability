@@ -31,7 +31,8 @@ import nltk
 from nltk.stem import WordNetLemmatizer
 
 # DB_PATH = './enwiki-20170820.db'
-COCA_PATH = '/Users/ycho/Music/Dropbox/5_GIT/coca-scene/results'
+# COCA_PATH = '/Users/ycho/Music/Dropbox/5_GIT/coca-scene/results'
+COCA_PATH = '/Users/ycho/Music/Dropbox/5_GIT/coca-search/result'
 nltk.download('averaged_perceptron_tagger')
 nltk.download('punkt')
 lemmatizer = WordNetLemmatizer()
@@ -145,7 +146,7 @@ def get_sentences_COCA(word):
       word_sentences = f.readlines()
 
   print('Total number of sentences: %d'%len(word_sentences))
-  # np.random.shuffle(word_sentences)
+  np.random.shuffle(word_sentences)
   return word_sentences
 
 def get_poses(word, sentences):
