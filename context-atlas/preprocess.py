@@ -29,26 +29,28 @@ import json
 from tqdm import tqdm
 import nltk
 from nltk.stem import WordNetLemmatizer
+import pandas as pd
 
 # DB_PATH = './enwiki-20170820.db'
 # COCA_PATH = '/Users/ycho/Music/Dropbox/5_GIT/coca-scene/results'
-COCA_PATH = '/Users/ycho/Music/Dropbox/5_GIT/coca-search/result'
+COCA_PATH = '/Users/ycho/Music/Dropbox/5_GIT/coca-scenes/scenes-long-update'
 nltk.download('averaged_perceptron_tagger')
 nltk.download('punkt')
 lemmatizer = WordNetLemmatizer()
 
-def neighbors(word, sentences, include_context=True):
+def neighbors(word, df, include_context):
   """Get the info and (umap-projected) embeddings about a word."""
-  # Get part of speech of this word.
-  sent_data = get_poses(word, sentences)
+  # # Get part of speech of this word.
+  # sent_data = get_poses(word, sentences)
+  df_dict = df.T.to_dict()
 
   # Get embeddings.
-  points = get_embeddings(word.lower(), sentences, include_context)
+  points = get_embeddings(word.lower(), df, include_context)
 
   # Use UMAP to project down to 3 dimensions.
   points_transformed = project_umap(points)
 
-  return {'labels': sent_data, 'data': points_transformed}
+  return {'labels': df_dict, 'data': points_transformed}
 
 def project_umap(points):
   """Project the words (by layer) into 3 dimensions using umap."""
@@ -58,22 +60,28 @@ def project_umap(points):
     points_transformed.append(transformed)
   return points_transformed
 
-def get_embeddings(word, sentences, include_context=True):
+def get_embeddings(word, df, include_context=True):
   """Get the embedding for a word in each sentence."""
   # Tokenized input
   layers = range(-12, 0)
   points = [[] for layer in layers]
-  print('Getting embeddings for %d sentences '%len(sentences))
-  for sentence in sentences:
-    # Apply lowercase to each sentence
-    sentence = sentence.lower()
+
+  print('Getting embeddings for %d sentences '%len(df))
+  for sent_i in range(len(df)):
+    # Get i-th row from dataframe
+    row_i = df.iloc[sent_i]
 
     # If include_context is set as False, only take the middle sentence (= the target sentence)
-    if not include_context:
-      sentence = sentence.split('|')[1]  # discarding the prev and next sentences
+    if include_context == 'short': # neighboring sentences (right before and right after)
+      prev_context = row_i['prev']
+      next_context = row_i['next']
+      sentence = ' '.join([prev_context, row_i['sent'], next_context])
+    elif include_context == 'long': # around 100 chars before and after
+      prev_context = row_i['prev_context']
+      next_context = row_i['next_context']
+      sentence = ' '.join([prev_context, row_i['sent'], next_context])
     else:
-      tokenized_text_with_sentbound = tokenizer.tokenize(sentence)
-      sentence = sentence.replace(" | ", " ")  # remove sentence boundaries ('|')
+      sentence = row_i.sent
 
     sentence = '[CLS] ' + sentence + ' [SEP]'
     tokenized_text = tokenizer.tokenize(sentence)
@@ -94,8 +102,7 @@ def get_embeddings(word, sentences, include_context=True):
       else:
         # To get word index matched in the target sentence (and not in the previous context sentence)
         word_idx = [i for i, x in enumerate(lemmatized_tokens)
-                    if x == word and i >= tokenized_text_with_sentbound.index("|")][0]
-
+                    if x == word and i >= len(prev_context.split())][0]
     # If the word is made up of multiple tokens, just use the first one of the tokens that make it up.
     except:
       for i, token in enumerate(tokenized_text):
@@ -140,49 +147,18 @@ def get_embeddings(word, sentences, include_context=True):
 
 def get_sentences_COCA(word):
   """Returns a bunch of sentences from COCA-fiction"""
-  print('Selecting sentences from COCA-fiction...')
-  word_fpath = COCA_PATH + '/' + word + '.txt'
-  with open(word_fpath) as f:
-      word_sentences = f.readlines()
+  print('Retrieving COCA-fiction samples...')
+  word_fpath = COCA_PATH + '/' + word + '.csv'
+  df = pd.read_csv(word_fpath)
+  df = df.rename(columns={'Unnamed: 0': 'uqid'})
 
-  print('Total number of sentences: %d'%len(word_sentences))
-  np.random.shuffle(word_sentences)
-  return word_sentences
-
-def get_poses(word, sentences):
-  """Get the part of speech tag for the given word in a list of sentences."""
-  sent_data = []
-  for sent in sentences:
-    text = nltk.word_tokenize(sent)
-    pos = nltk.pos_tag(text)
-    lemmatized = [lemmatizer.lemmatize(w) for w in text]
-
-    try:
-      # word_idx = text.index(word)
-      # Get word index in the target sentence (after a sentence boundary '|')
-      # ------------------------------------------------------------------------------------
-      # NB. Each mini document in COCA-fiction-scene data comprises of three sentences,
-      #     which are one target sentence (that includes the query word)
-      #           and two context sentences (one before and one after the target sentence):
-      #
-      #         "<previous sentence>|<target sentence>|<next sentence>"
-      #
-      # ------------------------------------------------------------------------------------
-      word_idx = [i for i, x in enumerate(lemmatized) if x == word and i > text.index("|")][0]
-      pos_tag = pos[word_idx][1]
-    except:
-      pos_tag = 'X'
-    sent_data.append({
-      'sentence': sent,
-      'pos': pos_tag
-    })
-
-  return sent_data
-
+  print('Total number of sentences: %d'%len(df))
+  df = df.sample(frac=1) # shuffle
+  return df
 
 if __name__ == '__main__':
   # Whether to include neighboring (prev and next) sentences as context when embedding a word
-  include_context = False
+  include_context = 'short' # choose from: ['short', 'long'] or None
 
   device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
   print("device : ", device)
@@ -200,14 +176,15 @@ if __name__ == '__main__':
     words = json.load(f)
 
   for word in tqdm(words):
-    word_sentences = get_sentences_COCA(word)
+    # Load a pandas Dataframe for the word
+    df = get_sentences_COCA(word)
 
-    # Take at most 1000 sentences.
-    sentences_w_word = word_sentences[:1000]
+    # Take at most n sentences.
+    df_smpl = df[:1000]
 
     # Process words and dump embeddings as json
     print(f'starting process for word : {word}')
-    locs_and_data = neighbors(word, sentences_w_word, include_context)
+    locs_and_data = neighbors(word, df_smpl, include_context)
     with open(f'static/jsons/{word}.json', 'w') as outfile:
       json.dump(locs_and_data, outfile)
 
