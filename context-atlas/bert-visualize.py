@@ -1,58 +1,104 @@
 import json
 import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
 from sklearn.neighbors import NearestNeighbors
 import numpy as np
+import plotly.express as px
+import plotly.io as pio
+from sklearn.cluster import KMeans
+import textwrap
+import re
+import sys
+from sklearn.metrics import pairwise_distances_argmin
+pio.renderers.default = 'browser'
 
-def get_neighbors(indices, query_sent_id):
-    top10_neighbor_ids = indices[query_sent_id][1:]  # The first nearest neighbor is the vector itself
-    print('< Query sentence >\n', df.loc[query_sent_id, "sentence_set"].replace(" | ", "\n "), '\n')
-    print(df.loc[top10_neighbor_ids, "sentence_set"].to_string().replace(" | ", "\n\t\t"))
 
+def get_neighbors(indices, query_id):
+    query_id_mapped = dfid_to_intid[query_id]
+    top10_neighbor_ids = indices[query_id_mapped][1:]  # The first nearest neighbor is the vector itself
+    # return top10_neighbor_ids
+    print(df.loc[query_id, 'sent'])
+    print(df.loc[top10_neighbor_ids, "sent"].to_string())
 
 # Query word and layer number to look at
-word = 'bathroom'
-layer_number = 11
+# word = 'coffee'
+word = sys.argv[1]
+layer_number = 8
 
 # Load json data
 with open('static/jsons/' + word + '.json') as f:
     corpus = json.load(f)
 
-# Create pandas dataframe from json
-df_list = []
-for i in range(len(corpus['labels'])):
-    sentence_set = corpus['labels'][i]['sentence']
-    sentence_set = sentence_set.replace('\n', '')
-    sent_prev, sent_curr, sent_next = sentence_set.split(' | ')
-    tag = corpus['labels'][i]['pos']
-    x, y = corpus['data'][layer_number][i]
-    df_list.append([word, sent_prev, sent_curr, sent_next, sentence_set, tag, x, y])
+# Curate a pandas dataframe
+df = pd.DataFrame(corpus['labels']).T
+df_xy = pd.DataFrame(corpus['data'][layer_number], columns=['x', 'y'])
+df['x'] = df_xy['x'].values
+df['y'] = df_xy['y'].values
 
-df = pd.DataFrame(df_list, columns=['word', 'sent-prev', 'sent-curr', 'sent-next', 'sentence_set', 'tag', 'x', 'y'])
+kmeans = KMeans(n_clusters=12, random_state=0).fit(np.array(df_xy))
 
-# Plotting
-plt.figure(figsize=(40, 40))
-p1 = sns.scatterplot(x="x", y="y", data=df, legend="full", alpha=0.9)
-texts = [plt.text(df["x"][idx], df["y"][idx], idx) for idx in range(df.shape[0])]
-plt.show()
+df['cluster'] = kmeans.labels_
+df["cluster"] = df["cluster"].astype(str)
+
+# Index handling
+df['idx-print'] = df.index
+df.index = df.index.astype(int)
+
+# Apply some formatting to sent for better visibility
+df["sent-print"] = df["sent"].apply(lambda txt: re.sub("(["+word[0].upper()+word[0].lower()+"])"+word[1:],
+                                                       r"<b>\1"+word[1:]+r"</b>", txt))
+df["sent-print"] = df["sent-print"].apply(lambda txt: '<br>'.join(textwrap.wrap(txt, width=40)))
+fig = px.scatter(df, x="x", y="y", color="cluster", category_orders={"cluster": np.sort(df['cluster'].unique())},
+                 hover_data={"x":False, "y":False, "cluster": False, "sent-print": True, "idx-print": True},
+                 color_discrete_sequence=px.colors.qualitative.Light24)
+
+fig.update_layout(
+    hoverlabel=dict(
+        font_size=20
+    )
+)
+
+fig.update_layout(
+    title={
+        'text': word,
+        'y':0.95,
+        'x':0.5,
+        'xanchor': 'center',
+        'yanchor': 'top'})
+
+fig.update_traces(hovertemplate="%{customdata[1]}<br>ID:%{customdata[2]}")
+fig.show()
+fig.write_image("./plot/" + word + ".png")
+fig.write_html("./plot/" + word + ".html")
 
 # Pandas dataframe setting + print texts
 pd.set_option('display.max_colwidth', -1)  # for the full display of text
-print(df['sentence_set'].to_string())
+# print(df['sent'].to_string())
 
 # Get neighbors of a specific sentence
-X = np.array(df[['x', 'y']].values.tolist())
-nbrs = NearestNeighbors(n_neighbors=11, algorithm='ball_tree').fit(X)
+X = np.array(df_xy)
+nbrs = NearestNeighbors(n_neighbors=11).fit(X)
 distances, indices = nbrs.kneighbors(X)
+dfid_to_intid = dict(zip(df.index, range(len(X))))
+intid_to_dfid = dict(zip(range(len(X)), df.index))
+indices_mapped = [list(map(intid_to_dfid.get, indices[i])) for i in range(len(indices))]
+
 
 # Inspect data
-query_sent_id = 436
-get_neighbors(indices, query_sent_id)
 
-# Get neighbors of very small distances (<d)
+# Centroids
+centroids = kmeans.cluster_centers_
+nearest_to_centroids = pairwise_distances_argmin(centroids, X, metric='euclidean')
+df_centroids = df.iloc[nearest_to_centroids]
+# print(df_centroids['sent'])
+for cent_id in range(len(df_centroids)):
+    print('Centroid#:' + str(cent_id))
+    cent_row = df_centroids.iloc[cent_id]
+    cent_query_id = cent_row.name
+    get_neighbors(indices_mapped, cent_query_id)
 
 
+# query_id = 138
+# get_neighbors(indices_mapped, query_id)
 
 
 
